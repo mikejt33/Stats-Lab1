@@ -1,0 +1,150 @@
+---
+title: "Lab1"
+author: "Michael McCormack"
+date: "February 3, 2018"
+output:
+  html_document: 
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(install.load)
+#Install_package function had some issues on my machine, so I'm assuming that these libraries are already installed on the machine being used - therefore used the load_package function
+load_package("mosaic", "ggplot2", "devtools","tidyverse","kernlab","psych","pROC")
+
+
+```
+
+
+
+##Intro
+For this project we used spam data from the kernlab package.  This data seems to be a data regarding Spam e-mail data.  More specifically,this is a data set collected at Hewlett-Packard Labs, that classifies 4601 e-mails as spam or non-spam.
+In addition to this class label there are 57 variables indicating the frequency of certain words and
+characters in the e-mail.  Below is a summary of the spam data.
+```{r}
+##Loading Appropriate data
+data(spam)
+
+x <- head(spam)
+##Shows first 6 instances of the data
+print(x)
+
+```
+
+```{r figs, echo=FALSE, fig.width=7,fig.height=6,fig.cap="\\label{fig:figs}https://images.techhive.com/images/article/2016/06/spam_email_screen_stock-100664936-large.jpg"}
+
+knitr::include_graphics("http://images.glaciermedia.ca/polopoly_fs/1.1298483.1490763920!/fileImage/httpImage/image.jpg_gen/derivatives/original_size/spam-email-filter-jpg.jpg")
+```
+
+##Summary of Data
+After examining the data, 3 variables that seem to be the most helpful in determining if an email is spam or not seem to be the variables - spam, address, and make.
+```{r}
+delayedAssign("x", spam) 
+myvars <- c('charDollar','charExclamation','type')
+newdata <- subset(x, select = myvars)
+head(newdata)
+```
+```{r}
+summary(newdata)
+
+#Intermediate Part
+grouped_summary <- newdata %>%
+  select(charDollar,charExclamation, type) %>%
+  group_by(type) %>%
+  summarise( dollar = mean(charDollar), exclamation = mean(charExclamation))
+
+dollar_mean <- grouped_summary$dollar
+
+grouped_summary
+
+```
+
+
+I chose the variables charExclamation because I have always associated Exclamation marks in e-mails that are spam, so I'd expect spam emails to have a higher exclamation rate.  I chose the type variable because it is the response variable that will be used in logistic regression.  It classifies the emails as either spam or not - this variable will also be beneficial in the initial plotting of our data.  I chose the variable charDollar, because I have always associated spam emails as having more dollar signs in them.
+
+
+It is very interesting to compare the dollar and exclamation means for the grouped summaries.  Comparing the means of dollar sign rate and exclamation sign rate for the spam and nonspam groups we find that the spam group - as expected - has higher rates of both dollar signs and exclamation marks.  Specifically the mean for dollar signs in the spam category was `r grouped_summary$dollar[2]/grouped_summary$dollar[1]` times higher than the nonspam category.  Additionally the mean for exclamation marks for the spam group was `r grouped_summary$exclamation[2]/grouped_summary$exclamation[1]` times higher than the nonspam group.  
+
+#### Quick EDA
+```{r}
+#Removing null values - However because there are 0 null values this step is not important in this dataset - however in theory it is always important to deal with nonperfect data
+clean <- newdata %>%
+  na.omit()
+
+```
+
+###Plotting
+```{r}
+#Initial plots
+ggplot(data = newdata, aes(charDollar, type)) + geom_point()
+ggplot(data = newdata, aes(charExclamation, type)) + geom_point()
+
+
+
+ggplot(data = newdata, aes(x = type,y =count(type), fill = type)) + geom_bar(stat="identity")
+
+# Violin Plots
+# Scale maximum width to 1 for all violins:
+ggplot(data = newdata, aes(factor(type),charDollar)) + geom_violin(scale = "width", aes(fill = factor(type))) + coord_flip()
+
+ggplot(data = newdata, aes(factor(type),charExclamation)) + geom_violin(scale = "width", aes(fill = factor(type))) + coord_flip()
+
+
+```
+
+## Data Analysis
+```{r}
+
+set.seed(1)
+#Splitting data into training and test sets
+# By default R comes with few datasets. 
+data = newdata
+dim(data) #4601    3
+
+clean_data <- data %>%
+  mutate(type = ifelse(type == "spam", 1,0))
+ 
+
+
+#Sample Indexes
+indexes = sample(1:nrow(clean_data), size=0.2*nrow(clean_data))
+ 
+# Split data
+test = clean_data[indexes,]
+dim(test)  # 920 3
+train = clean_data[-indexes,]
+dim(train) # 3681 3
+
+
+model <- glm(formula = type ~ ., family = binomial(link = "logit"), 
+    data = train)
+
+summary(model)
+anova(model)
+
+fitted.results <- predict(model,test,type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+misClasificError <- mean(fitted.results != test$type)
+#Determining Overall Accuracy
+print(paste('Accuracy',1-misClasificError))
+
+#Determining AUC
+roc_obj <- roc(test$type,fitted.results)
+auc(roc_obj)
+
+```
+
+It seems as though this model is accurate about 82% of the time.  Additionally, the AUC was determined to be 78.56%.  
+
+AUC is often predicted over accuracy for binary classification for a number of different reasons.  AUC stands for Area Under the Curve - the curve reffering to the ROC curve. ROC stands for Receiver Operating Characteristic. The implicit goal of AUC is to deal with situations where you have a very skewed sample distribution, and don't want to overfit to a single class.
+
+A great example is in spam detection. Generally spam data sets are STRONGLY biased towards spam, or not-spam. If your data set is 90% spam, you can get a pretty damn good accuracy by just saying that every single email is ham, which is obviously something that indicates a non-ideal classifier. 
+
+What you're actually getting when you do an AUC over accuracy is something that will strongly discourage people going for models that are representative, but not discriminative, as this will only actually select for models that achieve false positive and true positive rates that are significantly above random chance, which is not guaranteed for accuracy.
+
+
+AUC response adapted from:
+https://datascience.stackexchange.com/questions/806/advantages-of-auc-vs-standard-accuracy
+
